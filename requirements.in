@@ -1,0 +1,11 @@
+pandas
+requests
+openai
+python-dotenv
+pyarrow
+rapidfuzz
+matplotlib
+altair
+jupyterlab
+notebook
+mariadb

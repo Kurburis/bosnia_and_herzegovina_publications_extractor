@@ -9,16 +9,16 @@ import pyarrow as pa
 import pyarrow.dataset as ds
 
 # ----------------------- App config -----------------------
-st.set_page_config(page_title="Publications Explorer", layout="wide")
-st.title("Publications Explorer")
+st.set_page_config(page_title="B&H Publications Explorer", layout="wide")
+st.title("B&H Publications Explorer")
 
 # Default directory where your compression script wrote the shards
 DEFAULT_SHARD_DIR = "data/compressed"
 
-# Columns we’ll work with (canonical names without accidental spaces)
+# Canonical column names (we'll strip whitespace after load to match these)
 CANON_COLS = [
     "id",
-    "display_name",  # we'll strip spaces from column names after loading
+    "display_name",
     "publication_year",
     "primary_location.source.type",
     "best_oa_location.source.display_name",
@@ -53,10 +53,6 @@ def to_list(x):
         return [s] if s else []
     return [x]
 
-def first(x):
-    lst = to_list(x)
-    return lst[0] if lst else np.nan
-
 def norm_scimago(val):
     if pd.isna(val):
         return "Not in Scimago"
@@ -68,7 +64,7 @@ def norm_scimago(val):
     return "Other"
 
 def first_author_ba_mask(df: pd.DataFrame) -> pd.Series:
-    """Heuristic: find 'first' in author_position and map to same-index institution country."""
+    """Find 'first' in author_position and map to same-index institution country = BA."""
     pos = df.get("authorships.author_position", pd.Series(index=df.index)).apply(to_list)
     countries = df.get("authorships.institutions.country_code", pd.Series(index=df.index)).apply(to_list)
     def is_ba(i):
@@ -80,34 +76,39 @@ def first_author_ba_mask(df: pd.DataFrame) -> pd.Series:
                 return str(ci[idx]).upper() == "BA"
         except StopIteration:
             pass
-        # fallback: first institution
-        return bool(ci) and str(ci[0]).upper() == "BA"
+        return bool(ci) and str(ci[0]).upper() == "BA"  # fallback
     return pd.Series([is_ba(i) for i in range(len(df))], index=df.index)
 
 def resolve_dataset_columns(dataset: ds.Dataset, wanted_canon_cols: list[str]) -> list[str]:
-    """
-    Match wanted canonical names to actual dataset columns by stripping whitespace.
-    Returns list of actual names to request from Arrow.
-    """
+    """Match canonical names to actual dataset columns by stripping whitespace."""
     actual = list(dataset.schema.names)
-    # map stripped->actual (first occurrence wins)
-    stripper = {}
+    stripped_to_actual = {}
     for name in actual:
         key = name.strip()
-        if key not in stripper:
-            stripper[key] = name
-    resolved = [stripper[c] for c in wanted_canon_cols if c in stripper]
-    return resolved
+        if key not in stripped_to_actual:
+            stripped_to_actual[key] = name
+    return [stripped_to_actual[c] for c in wanted_canon_cols if c in stripped_to_actual]
 
-def infer_year_min_max_from_dataset(dataset: ds.Dataset) -> tuple[int, int] | tuple[int, int]:
+def infer_year_min_max_from_dataset(dataset: ds.Dataset) -> tuple[int, int]:
     if "publication_year" not in dataset.schema.names:
-        return (1990, 2025)
+        return (1999, 2025)
     tbl = dataset.to_table(columns=["publication_year"])
     s = pd.Series(tbl.column("publication_year")).astype("Int64")
     s = pd.to_numeric(s, errors="coerce").dropna()
     if s.empty:
-        return (1990, 2025)
+        return (1999, 2025)
     return (int(s.min()), int(s.max()))
+
+def unique_opts_from_list_col(df: pd.DataFrame, col: str):
+    if col not in df.columns:
+        return []
+    return sorted(
+        df[col].apply(to_list).explode().dropna().astype(str).str.strip().unique().tolist()
+    )
+
+def rows_intersecting(cell_vals, selected_set):
+    vals = set(to_list(cell_vals))
+    return bool(vals & selected_set)
 
 # ----------------------- Sidebar: data path + filters -----------------------
 with st.sidebar:
@@ -116,34 +117,43 @@ with st.sidebar:
     data_dir = st.text_input(
         "Parquet shards directory",
         value=DEFAULT_SHARD_DIR,
-        help="Folder that contains files like part_0000.parquet produced by your size-checked splitter.",
+        help="Folder containing part_0000.parquet, part_0001.parquet, …",
     )
     shard_dir = Path(data_dir)
     if not shard_dir.exists():
-        st.warning(f"Directory not found: {shard_dir} — adjust the path.")
+        st.warning(f"Directory not found: {shard_dir}")
         st.stop()
 
-    # Build a dataset from the directory
     dataset = ds.dataset(str(shard_dir), format="parquet")
-    # Resolve which actual column names to read (handles accidental leading spaces)
     actual_cols = resolve_dataset_columns(dataset, CANON_COLS)
 
-    # Year slider bounds (read only the year column once)
+    # Year slider (min capped at 1999)
     y_min, y_max = infer_year_min_max_from_dataset(dataset)
+    y_min = max(1999, y_min)
     years = st.slider("Publication year", min_value=int(y_min), max_value=int(y_max),
                       value=(max(y_min, 2010), y_max))
 
-    only_journals = st.checkbox("Only journals (primary_location.source.type = 'journal')", value=True)
-    want_first_author_ba = st.checkbox("First author affiliation country = BA", value=False)
+    only_journals = st.checkbox(
+        "Only journals (primary_location.source.type = 'journal')",
+        value=True
+    )
 
+    # Scimago select (enabled and meaningful only if journals are on)
     rank_opts = ["Q1", "Q2", "Q3", "Q4", "Unranked (that year)", "Not in Scimago", "Other"]
-    rank_sel = st.multiselect("Scimago ranks", rank_opts, default=rank_opts[:5])
+    rank_sel = st.multiselect(
+        "Scimago ranks",
+        rank_opts,
+        default=rank_opts[:6],  # include Not in Scimago by default
+        disabled=not only_journals,
+        help="Enabled only when filtering to journals."
+    )
+
+    want_first_author_ba = st.checkbox("First author affiliation country = BA", value=False)
 
 # ----------------------- Data loading -----------------------
 @st.cache_data(show_spinner=True)
 def load_filtered(dataset_uri: str, year_range: tuple[int, int], arrow_cols: list[str]) -> pd.DataFrame:
     dataset = ds.dataset(dataset_uri, format="parquet")
-    # Build filter on publication_year if present
     flt = None
     if "publication_year" in dataset.schema.names and year_range:
         y0, y1 = year_range
@@ -151,45 +161,61 @@ def load_filtered(dataset_uri: str, year_range: tuple[int, int], arrow_cols: lis
         flt = (fld >= pa.scalar(y0)) & (fld <= pa.scalar(y1))
     table = dataset.to_table(filter=flt, columns=arrow_cols if arrow_cols else None)
     df = table.to_pandas()
-    # Normalize headers by stripping accidental whitespace globally
-    df = df.rename(columns=lambda c: c.strip())
+    df = df.rename(columns=lambda c: c.strip())  # strip accidental whitespace
     return df
 
 df = load_filtered(str(shard_dir), (years[0], years[1]), actual_cols)
-
 if df.empty:
-    st.warning("No data loaded. Check the selected directory and filters.")
+    st.warning("No data loaded. Check the directory and filters.")
     st.stop()
 
 # ----------------------- Cleaning / derived -----------------------
 df = df.copy()
-
-# year
 df["publication_year"] = pd.to_numeric(df.get("publication_year"), errors="coerce").astype("Int64")
 
-# journal flag
 if "primary_location.source.type" in df.columns:
     df["is_journal"] = df["primary_location.source.type"].astype(str).str.lower().eq("journal")
 else:
     df["is_journal"] = True
 
-# scimago
-df["scimago_norm"] = df.get("scimagoRank").map(norm_scimago) if "scimagoRank" in df.columns else "Not in Scimago"
+df["scimago_norm"] = df.get("scimagoRank", pd.Series(index=df.index)).map(norm_scimago)
 
-# apply non-year filters (year already pushed down on load)
+# Journal/rank filters
 if only_journals:
     df = df[df["is_journal"]]
-df = df[df["scimago_norm"].isin(rank_sel)]
+    df = df[df["scimago_norm"].isin(rank_sel)]
 
-# first author BA
+# First author BA
 if want_first_author_ba:
     with st.spinner("Filtering by first author affiliation (BA)…"):
         mask_ba = first_author_ba_mask(df)
         df = df[mask_ba]
 
+# ----------------------- Topic filters (Domain / Field / Subfield) ----------
+st.sidebar.markdown("---")
+st.sidebar.subheader("Topics filter")
+
+domain_opts   = unique_opts_from_list_col(df, "topics.domain.display_name")
+field_opts    = unique_opts_from_list_col(df, "topics.field.display_name")
+subfield_opts = unique_opts_from_list_col(df, "topics.subfield.display_name")
+
+sel_domains   = st.sidebar.multiselect("Domains", domain_opts, default=[])
+sel_fields    = st.sidebar.multiselect("Fields", field_opts, default=[])
+sel_subfields = st.sidebar.multiselect("Subfields", subfield_opts, default=[])
+
+if sel_domains:
+    dset = set(sel_domains)
+    df = df[df["topics.domain.display_name"].apply(lambda v: rows_intersecting(v, dset))]
+if sel_fields:
+    fset = set(sel_fields)
+    df = df[df["topics.field.display_name"].apply(lambda v: rows_intersecting(v, fset))]
+if sel_subfields:
+    sfset = set(sel_subfields)
+    df = df[df["topics.subfield.display_name"].apply(lambda v: rows_intersecting(v, sfset))]
+
 st.caption(f"Active rows: {len(df):,}")
 
-# ----------------------- Visual 1: Publications by year & Scimago rank -----------------------
+# ----------------------- Visual 1: Publications by year ----------------------
 c1, c2 = st.columns(2)
 with c1:
     by_year = df["publication_year"].value_counts().sort_index()
@@ -197,14 +223,18 @@ with c1:
                  title="Publications per year")
     st.plotly_chart(fig, use_container_width=True)
 
+# ----------------------- Visual 1b: Scimago rank (journals only) -------------
 with c2:
-    order = ["Q1", "Q2", "Q3", "Q4", "Unranked (that year)", "Not in Scimago", "Other"]
-    by_rank = df["scimago_norm"].value_counts().reindex(order, fill_value=0)
-    fig = px.bar(by_rank, labels={"index": "Scimago rank", "value": "Count"},
-                 title="Publications by Scimago rank")
-    st.plotly_chart(fig, use_container_width=True)
+    if only_journals:
+        order = ["Q1", "Q2", "Q3", "Q4", "Unranked (that year)", "Not in Scimago", "Other"]
+        by_rank = df["scimago_norm"].value_counts().reindex(order, fill_value=0)
+        fig = px.bar(by_rank, labels={"index": "Scimago rank", "value": "Count"},
+                     title="Publications by Scimago rank (journals only)")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Scimago ranking applies to journals—enable 'Only journals' to see this plot.")
 
-# ----------------------- Visual 2: Top sources -----------------------
+# ----------------------- Visual 2: Top sources -------------------------------
 st.subheader("Top sources")
 top_n = st.slider("How many sources to show", 5, 50, 20, 5, key="n_sources")
 src_col = "best_oa_location.source.display_name"
@@ -219,76 +249,65 @@ if src_col in df.columns:
 else:
     st.info("Column 'best_oa_location.source.display_name' not available in the loaded data.")
 
-# ----------------------- Visual 3: Citations distribution -----------------------
-st.subheader("Citations")
+# ----------------------- Visual 3: Citations distribution (improved) ---------
+st.subheader("Citations distribution")
 if "cited_by_count" in df.columns:
-    cits = pd.to_numeric(df["cited_by_count"], errors="coerce")
-    fig = px.histogram(cits.dropna(), nbins=50,
+    cits = pd.to_numeric(df["cited_by_count"], errors="coerce").dropna()
+    col_left, col_right = st.columns([1,1])
+    with col_left:
+        cap_pct = st.slider("Cap x-axis at percentile", 80, 100, 99, 1,
+                            help="Clips extreme outliers so the distribution is readable.")
+    with col_right:
+        use_logx = st.checkbox("Log scale (x)", value=False,
+                               help="Log10 on x-axis for heavy-tailed distributions.")
+    xmax = cits.quantile(cap_pct / 100.0)
+    cits_capped = cits[cits <= xmax]
+    fig = px.histogram(cits_capped, nbins=50,
                        labels={"value": "Citations", "count": "Publications"},
-                       title="Citations distribution")
+                       title=f"Citations (≤ {cap_pct}th percentile: ≤ {int(xmax)})")
+    if use_logx:
+        fig.update_layout(xaxis_type="log")
     st.plotly_chart(fig, use_container_width=True)
 else:
     st.info("Column 'cited_by_count' not available.")
 
-# ----------------------- Visual 4: Institution countries (first listed) map -----------------------
-st.subheader("Institution countries (first listed)")
-if "authorships.institutions.country_code" in df.columns:
-    countries = df["authorships.institutions.country_code"].apply(first)
-    country_counts = (
-        pd.Series(countries).dropna().astype(str).str.upper()
-          .value_counts().rename_axis("iso_a2").reset_index(name="count")
-    )
-    if not country_counts.empty:
-        fig = px.choropleth(country_counts, locations="iso_a2", color="count",
-                            color_continuous_scale="Viridis",
-                            title="Institution countries (first listed)")
-        st.plotly_chart(fig, use_container_width=True)
+# ----------------------- Visual 4: Subfield co-occurrence --------------------
+st.subheader("Subfield co-occurrence")
+sf_col = "topics.subfield.display_name"
+if sf_col in df.columns:
+    lists = df[sf_col].apply(to_list)
+
+    if sel_subfields:
+        sel_set = set(sel_subfields)
+        # rows that contain any selected subfield(s)
+        mask = lists.apply(lambda L: bool(set(L) & sel_set))
+        sub_lists = lists[mask]
+        # count other subfields that appear alongside the selected ones
+        co_counts = (
+            sub_lists.apply(lambda L: [x for x in L if x not in sel_set])
+                     .explode().dropna().astype(str).str.strip()
+                     .value_counts().head(25)
+        )
+        if not co_counts.empty:
+            fig = px.bar(co_counts.sort_values(ascending=True),
+                         orientation="h",
+                         labels={"index": "Co-occurring subfield", "value": "Count"},
+                         title="Top co-occurring subfields with current selection")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No co-occurring subfields for the current selection.")
     else:
-        st.info("No country data to map in current selection.")
+        st.info("Select one or more subfields in the sidebar to see co-occurrence.")
 else:
-    st.info("Column 'authorships.institutions.country_code' not available.")
+    st.info("Column 'topics.subfield.display_name' not available.")
 
-# ----------------------- Visual 5: Topics snapshot -----------------------
-st.subheader("Topics snapshot (top 25)")
-def explode_counts(col):
-    if col not in df.columns:
-        return pd.Series(dtype=int)
-    return (
-        df[col].apply(to_list).explode().dropna().astype(str).str.strip()
-          .value_counts().head(25).sort_values(ascending=True)
-    )
-
-tc1, tc2, tc3 = st.columns(3)
-with tc1:
-    s = explode_counts("topics.domain.display_name")
-    fig = px.bar(s, orientation="h", labels={"index": "Domain", "value": "Count"},
-                 title="Top Domains")
-    st.plotly_chart(fig, use_container_width=True)
-with tc2:
-    s = explode_counts("topics.field.display_name")
-    fig = px.bar(s, orientation="h", labels={"index": "Field", "value": "Count"},
-                 title="Top Fields")
-    st.plotly_chart(fig, use_container_width=True)
-with tc3:
-    s = explode_counts("topics.subfield.display_name")
-    fig = px.bar(s, orientation="h", labels={"index": "Subfield", "value": "Count"},
-                 title="Top Subfields")
-    st.plotly_chart(fig, use_container_width=True)
-
-# ----------------------- Data table & download -----------------------
+# ----------------------- Data table & download -------------------------------
 st.subheader("Sample of rows")
-# After renaming, our canonical names should exist if they were in the dataset
 present_cols = [c for c in ["publication_year", "display_name",
                             "best_oa_location.source.display_name",
                             "scimago_norm", "cited_by_count", "id"]
                 if c in df.columns]
 if present_cols:
     st.dataframe(df[present_cols].head(200), use_container_width=True)
-    st.download_button(
-        "Download current subset (CSV)",
-        df[present_cols].to_csv(index=False).encode("utf-8"),
-        file_name="subset.csv",
-        mime="text/csv",
-    )
 else:
     st.info("Sample view: none of the expected display columns are present.")

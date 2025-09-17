@@ -41,7 +41,7 @@ def get_journal_intervals(journal_row, quartile_cols):
         start = year
         end = years[i+1] - 1 if i+1 < len(years) else 9999
         quartile = journal_row[f"Quartile - {year}"]
-        hindex = journal_row.get(f"H-index - {year}", "")
+        hindex = journal_row.get(f"H index - {year}", "")
         intervals.append((start, end, quartile, hindex))
     return intervals
 
@@ -51,7 +51,7 @@ def main():
     parser.add_argument('--conference_csv', help='Path to conference rankings CSV')
     parser.add_argument('--publications_csv', required=True, help='Path to publications CSV')
     parser.add_argument('--output_csv', required=True, help='Output CSV file for results')
-    parser.add_argument('--issn_columns', nargs='+', help='Names of ISSN columns in publications CSV')
+    parser.add_argument('--issn_column', help='Name of the ISSN column in publications CSV (optional)')
     parser.add_argument('--venue_column', default='venue', help='Name of venue column in publications CSV')
     parser.add_argument('--year_column', default='year', help='Name of year column in publications CSV')
     parser.add_argument('--start', type=int, default=0, help='Start index of publications to process')
@@ -79,14 +79,9 @@ def main():
 
     # Prepare output columns
     if args.mode in ['journal', 'both']:
-        # Require ISSN columns argument
-        if not args.issn_columns:
-            logging.error("Journal mode requires --issn_columns argument.")
+        if not args.journal_csv:
+            logging.error("Journal mode requires --journal_csv.")
             return
-        # Ensure all ISSN columns exist in the DataFrame
-        for col in args.issn_columns:
-            if col not in pubs_df.columns:
-                pubs_df[col] = ""
         pubs_df["scimagoRank"] = ""
         pubs_df["jHindex"] = ""
     if args.mode in ['conference', 'both']:
@@ -95,6 +90,70 @@ def main():
             pubs_df["coreRank"] = ""
         if "conferenceConfidence" not in pubs_df.columns:
             pubs_df["conferenceConfidence"] = ""
+
+    # --- Journal logic ---
+    if args.mode in ['journal', 'both']:
+        if not args.journal_csv:
+            logging.error("Journal mode requires --journal_csv.")
+            return
+        try:
+            journal_df = pd.read_csv(args.journal_csv, dtype=str).fillna("")
+        except Exception as e:
+            logging.error(f"Error reading journal CSV: {e}")
+            return
+        journal_lookup = {}
+        quartile_cols = [col for col in journal_df.columns if col.startswith("Quartile - ")]
+        for _, row in journal_df.iterrows():
+            issn_val = str(row.get("Issn", "")).strip()
+            if issn_val and issn_val.lower() != "nan":
+                journal_lookup[issn_val] = row
+        logging.info(f"Total unique ISSNs in journal lookup: {len(journal_lookup)}")
+
+        if args.issn_column and args.issn_column in pubs_df.columns:
+            for idx, pub in pubs_df.iterrows():
+                pub_id = pub.get("id", "")
+                year_val = pub.get(args.year_column, "")
+                try:
+                    pub_year = int(float(year_val)) if year_val else None
+                except Exception:
+                    pub_year = None
+                journal_rank = None
+                jhindex = None
+
+                # Parse ISSNs from the single column
+                issn_column_value = pub.get(args.issn_column, "")
+                if not issn_column_value or issn_column_value.lower() == "nan":
+                    logging.debug(f"Publication idx {idx} id {pub_id} has no ISSNs.")
+                    continue
+
+                try:
+                    issn_list = eval(issn_column_value) if isinstance(issn_column_value, str) else []
+                    if not isinstance(issn_list, list):
+                        logging.warning(f"Publication idx {idx} id {pub_id} has invalid ISSN format: {issn_column_value}")
+                        continue
+                except Exception as e:
+                    logging.warning(f"Error parsing ISSNs for publication idx {idx} id {pub_id}: {e}")
+                    continue
+
+                logging.debug(f"Publication idx {idx} id {pub_id} ISSNs: {issn_list} year: {pub_year}")
+                for issn in issn_list:
+                    issn = str(issn).strip()
+                    journal_row = journal_lookup.get(issn)
+                    if journal_row is not None:
+                        intervals = get_journal_intervals(journal_row, quartile_cols)
+                        logging.debug(f"Journal ISSN {issn} intervals: {intervals}")
+                        for start, end, quartile, hindex in intervals:
+                            if pub_year and start <= pub_year <= end:
+                                journal_rank = quartile
+                                jhindex = hindex
+                                logging.info(f"Assigned journal rank '{quartile}' and h-index '{hindex}' to pub idx {idx} (id {pub_id}) for year {pub_year} (ISSN {issn})")
+                                break
+                        if journal_rank or jhindex:
+                            break
+                pubs_df.at[idx, "scimagoRank"] = journal_rank if journal_rank else ""
+                pubs_df.at[idx, "jHindex"] = jhindex if jhindex else ""
+        else:
+            logging.warning("No ISSN column provided or found in the publications CSV. Skipping journal ranking.")
 
     # --- Conference logic ---
     if args.mode in ['conference', 'both']:
@@ -136,64 +195,14 @@ def main():
                         except Exception:
                             pub_year = None
                         intervals = get_conference_intervals(conf_row, conf_year_cols)
-                        logging.debug(f"Pub idx {pub_idx} '{pub_row['primary_location.source.display_name']}' year {pub_year} intervals: {intervals}")
+                        logging.debug(f"Pub idx {pub_idx} '{pub_row[args.venue_column]}' year {pub_year} intervals: {intervals}")
                         for start, end, rank in intervals:
                             if pub_year and start <= pub_year <= end:
                                 pubs_df.at[pub_idx, "coreRank"] = rank
-                                logging.info(f"Assigned conference rank '{rank}' to pub idx {pub_idx} ({pub_row['primary_location.source.display_name']}) for year {pub_year}")
+                                logging.info(f"Assigned conference rank '{rank}' to pub idx {pub_idx} ({pub_row[args.venue_column]}) for year {pub_year}")
                                 break
 
-        pubs_df = pubs_df.drop(columns=["norm_venue", "venue_acronym", "short"], errors="ignore")
-    else:
-        pubs_df = pubs_df.drop(columns=["norm_venue", "venue_acronym", "short"], errors="ignore")
-
-    # --- Journal logic ---
-    if args.mode in ['journal', 'both']:
-        if not args.journal_csv or not args.issn_columns:
-            logging.error("Journal mode requires --journal_csv and --issn_columns.")
-            return
-        try:
-            journal_df = pd.read_csv(args.journal_csv, dtype=str).fillna("")
-        except Exception as e:
-            logging.error(f"Error reading journal CSV: {e}")
-            return
-        journal_lookup = {}
-        quartile_cols = [col for col in journal_df.columns if col.startswith("Quartile - ")]
-        for _, row in journal_df.iterrows():
-            issn_val = str(row.get("Issn", "")).strip()
-            if issn_val and issn_val.lower() != "nan":
-                journal_lookup[issn_val] = row
-        logging.info(f"Total unique ISSNs in journal lookup: {len(journal_lookup)}")
-        for idx, pub in pubs_df.iterrows():
-            pub_id = pub.get("id", "")
-            year_val = pub.get(args.year_column, "")
-            try:
-                pub_year = int(float(year_val)) if year_val else None
-            except Exception:
-                pub_year = None
-            journal_rank = None
-            jhindex = None
-            issn_keys = set()
-            for col in args.issn_columns:
-                val = str(pub.get(col, "")).strip()
-                if val and val.lower() != "nan":
-                    issn_keys.add(val)
-            logging.debug(f"Publication idx {idx} id {pub_id} ISSNs: {issn_keys} year: {pub_year}")
-            for key in issn_keys:
-                journal_row = journal_lookup.get(key)
-                if journal_row is not None:
-                    intervals = get_journal_intervals(journal_row, quartile_cols)
-                    logging.debug(f"Journal ISSN {key} intervals: {intervals}")
-                    for start, end, quartile, hindex in intervals:
-                        if pub_year and start <= pub_year <= end:
-                            journal_rank = quartile
-                            jhindex = hindex
-                            logging.info(f"Assigned journal rank '{quartile}' and h-index '{hindex}' to pub idx {idx} (id {pub_id}) for year {pub_year} (ISSN {key})")
-                            break
-                    if journal_rank or jhindex:
-                        break
-            pubs_df.at[idx, "scimagoRank"] = journal_rank if journal_rank else ""
-            pubs_df.at[idx, "jHindex"] = jhindex if jhindex else ""
+        pubs_df = pubs_df.drop(columns=["norm_venue", "venue_acronym"], errors="ignore")
 
     # Save to output CSV (can be same as input)
     try:

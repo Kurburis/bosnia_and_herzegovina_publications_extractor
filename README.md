@@ -179,10 +179,9 @@ Podaci iz **OpenAlex** dostupni su pod licencom **CC0 1.0 (Public Domain Dedicat
 
 ### Semantic Scholar (API)
 
-Ovaj projekat koristi **Semantic Scholar API (AI2)** u skladu s uslovima licence za **internu, nekomercijalnu** upotrebu u svrhe istraživanja/obrazovanja.
+Ovaj projekat koristi [**Semantic Scholar API (AI2)**](https://www.semanticscholar.org/?utm_source=api) u skladu s uslovima licence za **internu, nekomercijalnu** upotrebu u svrhe istraživanja/obrazovanja.
 
-[![Semantic Scholar](./a2.png "Semantic Scholar (AI2)")]
-(https://www.semanticscholar.org/?utm_source=api)
+![Semantic Scholar](./a2.png "Semantic Scholar (AI2)")
 
 Podaci djelimično pruženi od **Semantic Scholar (AI2)**.
 
@@ -371,9 +370,9 @@ Data from **OpenAlex** are available under the **CC0 1.0 (Public Domain Dedicati
 
 ### Semantic Scholar (API)
 
-This project uses the **Semantic Scholar API (AI2)** in accordance with the license terms for **internal, non-commercial** use for research/educational purposes.
+This project uses the [**Semantic Scholar API (AI2)**](https://www.semanticscholar.org/?utm_source=api) in accordance with the license terms for **internal, non-commercial** use for research/educational purposes.
 
-[![Semantic Scholar](./a2.png "Semantic Scholar (AI2)")](https://www.semanticscholar.org/?utm_source=api)
+![Semantic Scholar](./a2.png "Semantic Scholar (AI2)")
 
 Data partially provided by **Semantic Scholar (AI2)**.
 

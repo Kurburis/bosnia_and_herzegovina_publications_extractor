@@ -10,7 +10,7 @@ Ovaj repozitorij sadrži skripte potrebne za prikupljanje, čišćenje, spajanje
 
 Kod za preuzimanje, obradu i web aplikaciju nalazi se u ovom repozitoriju (vidi niže **Raspored skripti** i **Pokretanje**).
 
-Online vizualizaciji možete pristupiti [ovdje](https://6dmamnwpgafxbghf6t5gtz.streamlit.app/).
+Online vizualizaciji možete pristupiti [ovdje](https://6dmamnwpgafxbghf6t5gtz.streamlit.app/), a čitav dataset se može preuzeti [ovdje](https://huggingface.co/datasets/xuad/bh_publications_2025).
 
 ---
 
@@ -161,6 +161,7 @@ python tools/split_parquet_by_size.py   --input data/ba_publications.csv   --out
 
 ## TODO
 
+- [ ] Popuniti kolone publikacija čiji su podaci sa Semantic Scholara korištenjem LLM-ova.
 - [ ] Poboljšati normalizaciju i detekciju konferencija.
 - [ ] Deduplikacija i validacija metapodataka.
 - [ ] Kreirati jednu biblioteku za često korištene funkcije i čišćenje koda.
@@ -200,7 +201,7 @@ This repository contains scripts necessary for collecting, cleaning, merging, an
 
 The code for downloading, processing, and the web application is located in this repository (see below **Script Overview** and **Running**).
 
-Online visualisation can seen [here](https://6dmamnwpgafxbghf6t5gtz.streamlit.app/).
+Online visualisation can be found [here](https://6dmamnwpgafxbghf6t5gtz.streamlit.app/), while the whole dataset can be downloaded from [here](https://huggingface.co/datasets/xuad/bh_publications_2025).
 
 
 ---
@@ -353,6 +354,7 @@ python tools/split_parquet_by_size.py   --input data/ba_publications.csv   --out
 
 ## TODO
 
+- [ ] Fill out the columns of the publications retrived via Semantic Scholar using LLMs.
 - [ ] Improve normalization and detection of conferences.
 - [ ] Deduplication and validation of metadata.
 - [ ] Create a single library for frequently used functions and code cleaning.

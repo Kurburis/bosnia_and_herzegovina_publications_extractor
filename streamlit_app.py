@@ -25,10 +25,12 @@ CANON_COLS = [
     "best_oa_location.source.issn",
     "cited_by_count",
     "scimagoRank",
+    "primary_location.source.display_name",
     # arrays
     "authorships.author.display_name",
     "authorships.author_position",
     "authorships.institutions.country_code",
+    "authorships.institutions.display_name",
     "topics.domain.display_name",
     "topics.field.display_name",
     "topics.subfield.display_name",
@@ -215,6 +217,28 @@ if sel_subfields:
 
 st.caption(f"Active rows: {len(df):,}")
 
+# ----------------------- Sidebar: Authorship filters -----------------------
+st.sidebar.markdown("---")
+st.sidebar.subheader("Authorship filters")
+
+# Extract unique options for institutions and authors
+institution_opts = unique_opts_from_list_col(df, "authorships.institutions.display_name")
+author_opts = unique_opts_from_list_col(df, "authorships.author.display_name")
+
+# Sidebar multiselect for institutions and authors
+sel_institutions = st.sidebar.multiselect("Institutions", institution_opts, default=[])
+sel_authors = st.sidebar.multiselect("Authors", author_opts, default=[])
+
+# Apply filters based on selected institutions and authors
+if sel_institutions:
+    inst_set = set(sel_institutions)
+    df = df[df["authorships.institutions.display_name"].apply(lambda v: rows_intersecting(v, inst_set))]
+if sel_authors:
+    auth_set = set(sel_authors)
+    df = df[df["authorships.author.display_name"].apply(lambda v: rows_intersecting(v, auth_set))]
+
+st.caption(f"Active rows after authorship filters: {len(df):,}")
+
 # ----------------------- Visual 1: Publications by year ----------------------
 c1, c2 = st.columns(2)
 with c1:
@@ -237,7 +261,7 @@ with c2:
 # ----------------------- Visual 2: Top sources -------------------------------
 st.subheader("Top sources")
 top_n = st.slider("How many sources to show", 5, 50, 20, 5, key="n_sources")
-src_col = "best_oa_location.source.display_name"
+src_col = "primary_location.source.display_name"
 if src_col in df.columns:
     top_sources = (
         df[src_col].dropna().astype(str).value_counts().head(top_n).sort_values(ascending=True)
@@ -247,7 +271,7 @@ if src_col in df.columns:
                  title=f"Top {top_n} sources")
     st.plotly_chart(fig, use_container_width=True)
 else:
-    st.info("Column 'best_oa_location.source.display_name' not available in the loaded data.")
+    st.info("Column 'primary_location.source.display_name' not available in the loaded data.")
 
 # ----------------------- Visual 3: Citations distribution (improved) ---------
 st.subheader("Citations distribution")
@@ -304,7 +328,7 @@ else:
 # ----------------------- Data table & download -------------------------------
 st.subheader("Sample of rows")
 present_cols = [c for c in ["publication_year", "display_name",
-                            "best_oa_location.source.display_name",
+                            "primary_location.source.display_name",
                             "scimago_norm", "cited_by_count", "id"]
                 if c in df.columns]
 if present_cols:

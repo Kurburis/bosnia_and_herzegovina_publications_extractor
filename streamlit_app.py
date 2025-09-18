@@ -24,7 +24,7 @@ CANON_COLS = [
     "scimagoRank",
     "primary_location.source.display_name",
     # arrays
-    "locations.source.issn"
+    "locations.source.issn",
     "authorships.author.display_name",
     "authorships.author_position",
     "authorships.institutions.country_code",
@@ -341,3 +341,4 @@ present_cols = [c for c in ["publication_year","display_name",
                             "scimago_norm","cited_by_count","id"] if c in df.columns]
 if present_cols:
     st.dataframe(df[present_cols].head(200), use_container_width=True)
+

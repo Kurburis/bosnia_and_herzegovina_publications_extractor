@@ -10,11 +10,13 @@ Ovaj repozitorij sadrži skripte potrebne za prikupljanje, čišćenje, spajanje
 
 Kod za preuzimanje, obradu i web aplikaciju nalazi se u ovom repozitoriju (vidi niže **Raspored skripti** i **Pokretanje**).
 
+Online vizualizaciji možete pristupiti [ovdje](https://6dmamnwpgafxbghf6t5gtz.streamlit.app/).
+
 ---
 
 ## Sadržaj
 
-- [📚 BH naučne publikacije](#-bh-naučne-publikacije)
+- [BH naučne publikacije](#-bh-naučne-publikacije)
   - [Sažetak](#sažetak)
   - [Sadržaj](#sadržaj)
   - [Publikacije](#publikacije)
@@ -28,21 +30,6 @@ Kod za preuzimanje, obradu i web aplikaciju nalazi se u ovom repozitoriju (vidi 
   - [Licenca i zahvale](#licenca-i-zahvale)
     - [OpenAlex](#openalex)
     - [Semantic Scholar (API)](#semantic-scholar-api)
-- [BH Scientific Publications](#bh-scientific-publications)
-  - [Summary](#summary)
-  - [Contents](#contents)
-  - [Publications](#publications)
-  - [Data Structure](#data-structure)
-  - [Script Explanation](#script-explanation)
-  - [Local Execution](#local-execution)
-  - [Streamlit Application](#streamlit-application)
-  - [Compression and Splitting of Large Files](#compression-and-splitting-of-large-files)
-  - [Known Limitations and Notes](#known-limitations-and-notes)
-  - [TODO](#todo-1)
-  - [License and Acknowledgments](#license-and-acknowledgments)
-    - [OpenAlex](#openalex-1)
-    - [Semantic Scholar (API)](#semantic-scholar-api-1)
-
 ---
 
 ## Publikacije
@@ -135,8 +122,7 @@ python src/annotate_research_areas.py --input data/ba_publications.csv --output 
 python src/assign_publication_rankings_csv.py --journal_csv data/ranking_journals/SCIMAGOJR.csv --conference_csv data/ranking_conferences/CORE.csv --publications_csv data/ba_publications.csv --output_csv data/ba_publications.csv --issn_column locations.source.issn --venue_column location.source.display_name --verbose --mode both --year_column publication_year
 ```
 
-**Napomena**
-Pošto korake za pokreranje skripti radim retroaktivno, moguće da će biti nekih problema. Možete dignuti issue. Za testiranje bi bilo *pametno* koristiti različita imena input i output fajlova te koristiti verbose flag.
+> **Napomena** Pošto korake za pokreranje skripti radim retroaktivno, moguće da će biti nekih problema. Možete dignuti issue. Za testiranje bi bilo *pametno* koristiti različita imena input i output fajlova te koristiti verbose flag.
 
 ---
 
@@ -214,24 +200,13 @@ This repository contains scripts necessary for collecting, cleaning, merging, an
 
 The code for downloading, processing, and the web application is located in this repository (see below **Script Overview** and **Running**).
 
+Online visualisation can seen [here](https://6dmamnwpgafxbghf6t5gtz.streamlit.app/).
+
+
 ---
 
 ## Contents
 
-- [📚 BH naučne publikacije](#-bh-naučne-publikacije)
-  - [Sažetak](#sažetak)
-  - [Sadržaj](#sadržaj)
-  - [Publikacije](#publikacije)
-  - [Struktura podataka](#struktura-podataka)
-  - [Objašnjenje skripti](#objašnjenje-skripti)
-  - [Lokаlnо pokretanje](#lokаlnо-pokretanje)
-  - [Streamlit aplikacija](#streamlit-aplikacija)
-  - [Kompresija i split velikih fajlova](#kompresija-i-split-velikih-fajlova)
-  - [Poznate manjkavosti i napomene](#poznate-manjkavosti-i-napomene)
-  - [TODO](#todo)
-  - [Licenca i zahvale](#licenca-i-zahvale)
-    - [OpenAlex](#openalex)
-    - [Semantic Scholar (API)](#semantic-scholar-api)
 - [BH Scientific Publications](#bh-scientific-publications)
   - [Summary](#summary)
   - [Contents](#contents)
@@ -339,8 +314,7 @@ python src/annotate_research_areas.py --input data/ba_publications.csv --output 
 python src/assign_publication_rankings_csv.py --journal_csv data/ranking_journals/SCIMAGOJR.csv --conference_csv data/ranking_conferences/CORE.csv --publications_csv data/ba_publications.csv --output_csv data/ba_publications.csv --issn_column locations.source.issn --venue_column location.source.display_name --verbose --mode both --year_column publication_year
 ```
 
-**Note**
-Since the steps for running scripts are being done retroactively, there may be some issues. You can raise an issue. For testing, it would be *smart* to use different names for input and output files and use the verbose flag.
+>**Note** Since the steps for running scripts are being done retroactively, there may be some issues. You can raise an issue. For testing, it would be *smart* to use different names for input and output files and use the verbose flag.
 
 ---
 

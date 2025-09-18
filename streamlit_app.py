@@ -20,11 +20,11 @@ CANON_COLS = [
     "publication_year",
     "primary_location.source.type",
     "best_oa_location.source.display_name",
-    "best_oa_location.source.issn",
     "cited_by_count",
     "scimagoRank",
     "primary_location.source.display_name",
     # arrays
+    "locations.source.issn"
     "authorships.author.display_name",
     "authorships.author_position",
     "authorships.institutions.country_code",

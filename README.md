@@ -1,93 +1,406 @@
-# bosnia_and_herzegovina_publications_extractor
+# 📚 BH naučne publikacije
 
+> **Napomena:** Ispod je i verzija na engleskom jeziku.
 
+---
 
-## Getting started
+## Sažetak
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+Ovaj repozitorij sadrži skripte potrebne za prikupljanje, čišćenje, spajanje i vizualizaciju naučnih publikacija autora povezanih sa Bosnom i Hercegovinom. **Glavni izvori** podataka su [Akademski imenik](https://www.akademskiimenik.ba) i [OpenAlex](https://openalex.org/) repozitoriji. S obzirom da oba izvora podataka automatski skupljaju podatke te koriste mašinsko učenje za određene klasifikacije, greške u pojedinačnim podacima su moguće, međutim opći trendovi ne bi trebali biti značajno drugačiji.
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+Kod za preuzimanje, obradu i web aplikaciju nalazi se u ovom repozitoriju (vidi niže **Raspored skripti** i **Pokretanje**).
 
-## Add your files
+---
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## Sadržaj
 
+- [📚 BH naučne publikacije](#-bh-naučne-publikacije)
+  - [Sažetak](#sažetak)
+  - [Sadržaj](#sadržaj)
+  - [Publikacije](#publikacije)
+  - [Struktura podataka](#struktura-podataka)
+  - [Objašnjenje skripti](#objašnjenje-skripti)
+  - [Lokаlnо pokretanje](#lokаlnо-pokretanje)
+  - [Streamlit aplikacija](#streamlit-aplikacija)
+  - [Kompresija i split velikih fajlova](#kompresija-i-split-velikih-fajlova)
+  - [Poznate manjkavosti i napomene](#poznate-manjkavosti-i-napomene)
+  - [TODO](#todo)
+  - [Licenca i zahvale](#licenca-i-zahvale)
+    - [OpenAlex](#openalex)
+    - [Semantic Scholar (API)](#semantic-scholar-api)
+- [BH Scientific Publications](#bh-scientific-publications)
+  - [Summary](#summary)
+  - [Contents](#contents)
+  - [Publications](#publications)
+  - [Data Structure](#data-structure)
+  - [Script Explanation](#script-explanation)
+  - [Local Execution](#local-execution)
+  - [Streamlit Application](#streamlit-application)
+  - [Compression and Splitting of Large Files](#compression-and-splitting-of-large-files)
+  - [Known Limitations and Notes](#known-limitations-and-notes)
+  - [TODO](#todo-1)
+  - [License and Acknowledgments](#license-and-acknowledgments)
+    - [OpenAlex](#openalex-1)
+    - [Semantic Scholar (API)](#semantic-scholar-api-1)
+
+---
+
+## Publikacije
+
+Dataset je sačinjen od:
+
+- Svih publikacija na BH akademskom imeniku;
+- Svih publikacija autora u OpenAlex bazi koji su **u nekom trenutku karijere** imali afilijaciju u BiH.
+
+Na taj način, sakupljeno je oko **110,000 radova**. 
+
+## Struktura podataka
+
+Većina kolona prati OpenAlex API, a nekoliko je specifično za radove iz BH akademskog imenika. 
+
+**Kolone od interesa:**
+
+- `id` – link na OpenAlex stranicu rada
+- `authorships.author.display_name` – *array* imena autora  
+- `authorships.author.id` – *array* OpenAlex ID-eva autora  
+- `authorships.author.orcid` – *array* ORCID ID-eva  
+- `authorships.author_position` – *array* pozicija autora (`first`, `mid`, `last`)  
+- `authorships.countries` – *array* ISO kodova zemalja autora  
+- `authorships.institutions.country_code` – *array* ISO kodova zemalja institucija  
+- `authorships.institutions.display_name` – *array* naziva institucija  
+- `authorships.institutions.id` – *array* ID/URL institucija  
+- `cited_by_count` – broj citata  
+- `display_name` – naziv rada
+- `locations.source.issn` – *array* ISSN-ova  
+- `primary_location.source.display_name,` – naziv časopisa/konferencije/izvora  
+- `primary_location.source.type` – tip izvora: `journal`, `conference`, `submitted_version`…  
+- `publication_year` – godina publikacije  
+- `topics.domain.display_name` – *array* domena (najširi nivo)  
+- `topics.field.display_name` – *array* polja (drugi nivo)  
+- `topics.subfield.display_name` – *array* podpolja (treći nivo)  
+- `topics.display_name` – *array* tema (četvrti nivo)  
+- `type_crossref` – tip prema Crossref/alternativnim klasifikacijama  
+- `semantic_id` – Semantic Scholar ID (za radove samo na Imeniku)  
+- `abstract` – sažetak (za dio radova iz Imenika)  
+- `addedViaImenik` – indikator da je rad došao iz Imenika  
+- `scimagoRank` – Scimago rang (`Q1–Q4`, `-` = nerangiran u toj godini, `NaN` = nije u Scimago-u te godine)  
+- `jHindex` – H-index časopisa (samo za rangirane)
+- `coreRank` – CORE rang AI i ML konferencija (TODO)
+
+> **Napomena za coreRank:** Ne postoji jedinstveni ID za konferencije kao što ima ISSN za časopise tako da je uparivanje rađeno po imenu/akronimu. Različiti nazivi za istu konferenciju mogu dovesti do propuštenih podudaranja.
+
+---
+
+## Objašnjenje skripti
+
+1. `src/annotate_research_areas.py`: Dodaje istraživačke oblasti publikacijama koristeći openAI API i OpenAlex postojeću klasifikaciju.
+2. `src/assign_publication_rankings_csv.py`: Dodjeljuje rangiranje publikacijama koristeći CSV fajlove za rangiranje.
+3. `src/create_imenik_publications_via_database.py`: Kreira CSV fajl na osnovu baze podatka imenik publikacija bez dupliranja sa OpenAlex publikacijama. Potreban pristup bazi Imenik bazi podataka.
+4. `src/data_compression.py`: Kompresuje velike CSV ili Parquet fajlove u manje Parquet fajlove.
+5. `src/download_openalex_authors.py`: Preuzima podatke o autorima sa OpenAlex platforme.
+6. `src/download_openalex_publications_via_authors.py`: Preuzima publikacije sa OpenAlex platforme na osnovu autora.
+7. `src/find_imenik_publication_oa_variant.py`: Pronalazi OpenAlex varijante Imenik publikacija.
+8. `src/join_oa_imenik_publications.py`: Spaja publikacije iz Imenika sa podacima iz OpenAlex-a.
+9. `src/merge_core_rankings.py`: Spaja rangiranja konferencija iz više godina u jednu CSV fajl.
+10. `src/merge_scimago_rankings.py`: Spaja SCImago rangiranja časopisa iz više godina u jednu CSV fajl.
+11. `src/remove_duplicates_via_ids.py`: Uklanja duplikate publikacija na osnovu non-OpenAlex ID-ova.
+12. `src/remove_nonuniqe_row.py`: Uklanja redove koji nisu jedinstveni iz CSV fajla.
+13. `src/transform_imenik2oa_csv.py`: Transformiše CSV fajl iz Imenika u format OpenAlex-a.
+
+---
+
+## Lokаlnо pokretanje
+
+**Instalacija potrebnih biblioteka**
+
+```bash
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip-compile --resolver=backtracking --generate-hashes -o requirements.txt requirements.in
+pip install -r requirements.txt
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/kurburis/bosnia_and_herzegovina_publications_extractor.git
-git branch -M main
-git push -uf origin main
+
+**Kreiranje database-a**
+
+```bash
+python src/download_openalex_bih_authors.py --output=data/ba_oa_authors_raw.csv
+python src/openalex_publications_via_authors.py --authors_csv data/ba_oa_authors_raw.csv --output data/ba_oa_publications_raw.csv --email=email@email.ba
+python src/remove_nonuniqe_row.py --input=data/ba_oa_publications_raw.csv --output data/ba_oa_publications2.csv --column id
+python src/create_imenik_publications_via_database.py --openalex_csv data/ba_oa_publications.csv --output_csv=data/ba_imenik_publications_raw.csv
+python src/transform_imenik2oa_csv.py --input data/ba_imenik_publications_raw.csv --output data/ba_imenik_publications.csv
+python src/join_oa_imenik_publications.py --openalex data/ba_oa_publications2.csv --imenik data/ba_imenik_publications.csv --output data/ba_publications.csv
+python src/find_imenik_publication_oa_variant.py --csv data/ba_publications.csv --email email@email.ba --output data/ba_publications.csv
+python src/remove_duplicates_via_ids.py --csv data/ba_publications.csv --originals data/ba_publications.csv --duplicates data/ba_publications_dupl.csv
+python src/annotate_research_areas.py --input data/ba_publications.csv --output data/ba_publications.csv 
+python src/assign_publication_rankings_csv.py --journal_csv data/ranking_journals/SCIMAGOJR.csv --conference_csv data/ranking_conferences/CORE.csv --publications_csv data/ba_publications.csv --output_csv data/ba_publications.csv --issn_column locations.source.issn --venue_column location.source.display_name --verbose --mode both --year_column publication_year
 ```
 
-## Integrate with your tools
+**Napomena**
+Pošto korake za pokreranje skripti radim retroaktivno, moguće da će biti nekih problema. Možete dignuti issue. Za testiranje bi bilo *pametno* koristiti različita imena input i output fajlova te koristiti verbose flag.
 
-- [ ] [Set up project integrations](https://gitlab.com/kurburis/bosnia_and_herzegovina_publications_extractor/-/settings/integrations)
+---
 
-## Collaborate with your team
+## Streamlit aplikacija
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+Pokretanje lokalno:
 
-## Test and Deploy
+```bash
+streamlit run streamlit_app.py
+```
+Streamlit je podešen da koristi Paraquet sharodove u `data/compressed` folderu jer to bio način da se čitava baza uploaduje na github, međutim za lokalno pokretanje moguće je koristiti originalni CSV file.
 
-Use the built-in continuous integration in GitLab.
+Aplikacija nudi filtriranje po godinama, Scimago rangu (samo časopisi), domenama/poljima/podpoljima, institucijama, autorima, te opciju **„prvi autor BA“**.
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+---
 
-***
+## Kompresija i split velikih fajlova
 
-# Editing this README
+Zbog GitHub limita od 100 MB fajlove dijelimo u Parquet shardove ≤ **95 MB**.
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+Primjer:
 
-## Suggestions for a good README
+```bash
+python tools/split_parquet_by_size.py   --input data/ba_publications.csv   --output data/compressed
+```
+---
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+## Poznate manjkavosti i napomene
 
-## Name
-Choose a self-explaining name for your project.
+- Nije ulaženo u način na koji je OpenAlex određivao koji radovi pripadaju kojem autoru te način na koji je određivao afilijacije autora.
+- Dio radova iz **BH akademskog imenika** nema sve mapirane OpenAlex kolone pošto je su oni odarađivali mnogo opsežniju AI identifikaciju, što za posljedicu može imati dosta `NaN` kolona.  
+- **Scimago:** `-` = nerangiran u toj godini; `NaN` = uopće nije u Scimago-u rankingu te godine.  
+- **Konferencije:** uparivanje po imenu/akronimu može biti nepouzdano s toga u vizuelizaciji nije prikazano ništa vezano za te podatke.
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+---
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+## TODO
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+- [ ] Poboljšati normalizaciju i detekciju konferencija.
+- [ ] Deduplikacija i validacija metapodataka.
+- [ ] Kreirati jednu biblioteku za često korištene funkcije i čišćenje koda.
+- [ ] Unifikacija koda za logove.
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+---
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+## Licenca i zahvale
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+- Licenca: **CC BY 4.0** 
+- Zahvale timu [**Akademski imenik BiH**](https://akademskiimenik.ba/) [**OpenAlex**](https://openalex.org/), [**Semantic Scholar**](https://www.semanticscholar.org/) na davanju pristupa podacima i velikim trudu da podaci o naučno-istraživačkom radu budu javno dostupni.
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+### OpenAlex
+Podaci iz **OpenAlex** dostupni su pod licencom **CC0 1.0 (Public Domain Dedication)**.
+> Priem, J., Piwowar, H., & Orr, R. (2022). *OpenAlex: A fully-open index of scholarly works, authors, venues, institutions, and concepts.* arXiv. https://arxiv.org/abs/2205.01833
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+### Semantic Scholar (API)
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+Ovaj projekat koristi **Semantic Scholar API (AI2)** u skladu s uslovima licence za **internu, nekomercijalnu** upotrebu u svrhe istraživanja/obrazovanja.
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+[![Semantic Scholar](./a2.png "Semantic Scholar (AI2)")]
+(https://www.semanticscholar.org/?utm_source=api)
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+Podaci djelimično pruženi od **Semantic Scholar (AI2)**.
 
-## License
-For open source projects, say how it is licensed.
+---
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+# BH Scientific Publications
+
+> **Note:** Machine translated.
+
+---
+
+## Summary
+
+This repository contains scripts necessary for collecting, cleaning, merging, and visualizing scientific publications of authors associated with Bosnia and Herzegovina. **The main data sources** are the [Academic Directory](https://www.akademskiimenik.ba) and [OpenAlex](https://openalex.org/) repositories. Since both data sources automatically collect data and use machine learning for certain classifications, errors in individual data entries are possible; however, general trends should not differ significantly.
+
+The code for downloading, processing, and the web application is located in this repository (see below **Script Overview** and **Running**).
+
+---
+
+## Contents
+
+- [📚 BH naučne publikacije](#-bh-naučne-publikacije)
+  - [Sažetak](#sažetak)
+  - [Sadržaj](#sadržaj)
+  - [Publikacije](#publikacije)
+  - [Struktura podataka](#struktura-podataka)
+  - [Objašnjenje skripti](#objašnjenje-skripti)
+  - [Lokаlnо pokretanje](#lokаlnо-pokretanje)
+  - [Streamlit aplikacija](#streamlit-aplikacija)
+  - [Kompresija i split velikih fajlova](#kompresija-i-split-velikih-fajlova)
+  - [Poznate manjkavosti i napomene](#poznate-manjkavosti-i-napomene)
+  - [TODO](#todo)
+  - [Licenca i zahvale](#licenca-i-zahvale)
+    - [OpenAlex](#openalex)
+    - [Semantic Scholar (API)](#semantic-scholar-api)
+- [BH Scientific Publications](#bh-scientific-publications)
+  - [Summary](#summary)
+  - [Contents](#contents)
+  - [Publications](#publications)
+  - [Data Structure](#data-structure)
+  - [Script Explanation](#script-explanation)
+  - [Local Execution](#local-execution)
+  - [Streamlit Application](#streamlit-application)
+  - [Compression and Splitting of Large Files](#compression-and-splitting-of-large-files)
+  - [Known Limitations and Notes](#known-limitations-and-notes)
+  - [TODO](#todo-1)
+  - [License and Acknowledgments](#license-and-acknowledgments)
+    - [OpenAlex](#openalex-1)
+    - [Semantic Scholar (API)](#semantic-scholar-api-1)
+
+---
+
+## Publications
+
+The dataset consists of:
+
+- All publications in the BH Academic Directory;
+- All publications of authors in the OpenAlex database who **at some point in their career** had an affiliation in BiH.
+
+In this way, approximately **110,000 works** were collected.
+
+## Data Structure
+
+Most columns follow the OpenAlex API, and a few are specific to works from the BH Academic Directory.
+
+**Columns of Interest:**
+
+- `id` – link to the OpenAlex page of the work
+- `authorships.author.display_name` – *array* of author names  
+- `authorships.author.id` – *array* of OpenAlex author IDs  
+- `authorships.author.orcid` – *array* of ORCID IDs  
+- `authorships.author_position` – *array* of author positions (`first`, `mid`, `last`)  
+- `authorships.countries` – *array* of ISO country codes of authors  
+- `authorships.institutions.country_code` – *array* of ISO country codes of institutions  
+- `authorships.institutions.display_name` – *array* of institution names  
+- `authorships.institutions.id` – *array* of institution IDs/URLs  
+- `cited_by_count` – number of citations  
+- `display_name` – title of the work
+- `locations.source.issn` – *array* of ISSNs  
+- `primary_location.source.display_name,` – name of the journal/conference/source  
+- `primary_location.source.type` – source type: `journal`, `conference`, `submitted_version`…  
+- `publication_year` – year of publication  
+- `topics.domain.display_name` – *array* of domains (broadest level)  
+- `topics.field.display_name` – *array* of fields (second level)  
+- `topics.subfield.display_name` – *array* of subfields (third level)  
+- `topics.display_name` – *array* of topics (fourth level)  
+- `type_crossref` – type according to Crossref/alternative classifications  
+- `semantic_id` – Semantic Scholar ID (for works only in the Directory)  
+- `abstract` – abstract (for some works from the Directory)  
+- `addedViaImenik` – indicator that the work came from the Directory  
+- `scimagoRank` – Scimago rank (`Q1–Q4`, `-` = unranked in that year, `NaN` = not in Scimago that year)  
+- `jHindex` – H-index of the journal (only for ranked ones)
+- `coreRank` – CORE rank of AI and ML conferences (TODO)
+
+> **Note on coreRank:** There is no unique ID for conferences like ISSN for journals, so matching was done by name/acronym. Different names for the same conference may lead to missed matches.
+
+---
+
+## Script Explanation
+
+1. `src/annotate_research_areas.py`: Adds research areas to publications using the OpenAI API and OpenAlex's existing classification.
+2. `src/assign_publication_rankings_csv.py`: Assigns rankings to publications using ranking CSV files.
+3. `src/create_imenik_publications_via_database.py`: Creates a CSV file based on the Directory database without duplicating OpenAlex publications. Requires access to the Directory database.
+4. `src/data_compression.py`: Compresses large CSV or Parquet files into smaller Parquet files.
+5. `src/download_openalex_authors.py`: Downloads author data from the OpenAlex platform.
+6. `src/download_openalex_publications_via_authors.py`: Downloads publications from the OpenAlex platform based on authors.
+7. `src/find_imenik_publication_oa_variant.py`: Finds OpenAlex variants of Directory publications.
+8. `src/join_oa_imenik_publications.py`: Merges publications from the Directory with data from OpenAlex.
+9. `src/merge_core_rankings.py`: Merges conference rankings from multiple years into one CSV file.
+10. `src/merge_scimago_rankings.py`: Merges SCImago journal rankings from multiple years into one CSV file.
+11. `src/remove_duplicates_via_ids.py`: Removes duplicate publications based on non-OpenAlex IDs.
+12. `src/remove_nonuniqe_row.py`: Removes non-unique rows from a CSV file.
+13. `src/transform_imenik2oa_csv.py`: Transforms a CSV file from the Directory into OpenAlex format.
+
+---
+
+## Local Execution
+
+**Installing Required Libraries**
+
+```bash
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip-compile --resolver=backtracking --generate-hashes -o requirements.txt requirements.in
+pip install -r requirements.txt
+```
+
+**Creating the Database**
+
+```bash
+python src/download_openalex_bih_authors.py --output=data/ba_oa_authors_raw.csv
+python src/openalex_publications_via_authors.py --authors_csv data/ba_oa_authors_raw.csv --output data/ba_oa_publications_raw.csv --email=email@email.ba
+python src/remove_nonuniqe_row.py --input=data/ba_oa_publications_raw.csv --output data/ba_oa_publications2.csv --column id
+python src/create_imenik_publications_via_database.py --openalex_csv data/ba_oa_publications.csv --output_csv=data/ba_imenik_publications_raw.csv
+python src/transform_imenik2oa_csv.py --input data/ba_imenik_publications_raw.csv --output data/ba_imenik_publications.csv
+python src/join_oa_imenik_publications.py --openalex data/ba_oa_publications2.csv --imenik data/ba_imenik_publications.csv --output data/ba_publications.csv
+python src/find_imenik_publication_oa_variant.py --csv data/ba_publications.csv --email email@email.ba --output data/ba_publications.csv
+python src/remove_duplicates_via_ids.py --csv data/ba_publications.csv --originals data/ba_publications.csv --duplicates data/ba_publications_dupl.csv
+python src/annotate_research_areas.py --input data/ba_publications.csv --output data/ba_publications.csv 
+python src/assign_publication_rankings_csv.py --journal_csv data/ranking_journals/SCIMAGOJR.csv --conference_csv data/ranking_conferences/CORE.csv --publications_csv data/ba_publications.csv --output_csv data/ba_publications.csv --issn_column locations.source.issn --venue_column location.source.display_name --verbose --mode both --year_column publication_year
+```
+
+**Note**
+Since the steps for running scripts are being done retroactively, there may be some issues. You can raise an issue. For testing, it would be *smart* to use different names for input and output files and use the verbose flag.
+
+---
+
+## Streamlit Application
+
+Run locally:
+
+```bash
+streamlit run streamlit_app.py
+```
+Streamlit is set to use Parquet shards in the `data/compressed` folder because that was the way to upload the entire database to GitHub. However, for local execution, it is possible to use the original CSV file.
+
+The application offers filtering by years, Scimago rank (journals only), domains/fields/subfields, institutions, authors, and the option **"first author BA"**.
+
+---
+
+## Compression and Splitting of Large Files
+
+Due to GitHub's 100 MB limit, files are split into Parquet shards ≤ **95 MB**.
+
+Example:
+
+```bash
+python tools/split_parquet_by_size.py   --input data/ba_publications.csv   --output data/compressed
+```
+---
+
+## Known Limitations and Notes
+
+- No effort was made to determine how OpenAlex identified which works belong to which author and how it determined author affiliations.
+- Some works from the **BH Academic Directory** do not have all mapped OpenAlex columns since they performed much more extensive AI identification, which may result in many `NaN` columns.  
+- **Scimago:** `-` = unranked in that year; `NaN` = not in Scimago ranking that year.  
+- **Conferences:** matching by name/acronym may be unreliable, so nothing related to these data is displayed in the visualization.
+
+---
+
+## TODO
+
+- [ ] Improve normalization and detection of conferences.
+- [ ] Deduplication and validation of metadata.
+- [ ] Create a single library for frequently used functions and code cleaning.
+- [ ] Unify code for logs.
+
+---
+
+## License and Acknowledgments
+
+- License: **CC BY 4.0** 
+- Thanks to the team at [**Akademski imenik BiH**](https://akademskiimenik.ba/) [**OpenAlex**](https://openalex.org/), [**Semantic Scholar**](https://www.semanticscholar.org/) for providing access to data and their great effort to make data on scientific research publicly available.
+
+### OpenAlex
+Data from **OpenAlex** are available under the **CC0 1.0 (Public Domain Dedication)** license.
+> Priem, J., Piwowar, H., & Orr, R. (2022). *OpenAlex: A fully-open index of scholarly works, authors, venues, institutions, and concepts.* arXiv. https://arxiv.org/abs/2205.01833
+
+### Semantic Scholar (API)
+
+This project uses the **Semantic Scholar API (AI2)** in accordance with the license terms for **internal, non-commercial** use for research/educational purposes.
+
+[![Semantic Scholar](./a2.png "Semantic Scholar (AI2)")](https://www.semanticscholar.org/?utm_source=api)
+
+Data partially provided by **Semantic Scholar (AI2)**.
+
+---

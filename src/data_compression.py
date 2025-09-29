@@ -32,6 +32,7 @@ def main():
     parser.add_argument('--input', required=True, help="Path to the input file (CSV or Parquet).")
     parser.add_argument('--output', required=True, help="Path to the output directory.")
     parser.add_argument('--limit', type=int, default=LIMIT, help="Maximum file size in bytes (default: 95MB).")
+    parser.add_argument('--name', default="part", help="Base name for the output files (default: 'part').")
     args = parser.parse_args()
 
     # Set up logging
@@ -53,11 +54,11 @@ def main():
         logging.info(f"Processing CSV file: {input_path}")
         for i, chunk in enumerate(pd.read_csv(input_path, chunksize=250_000, low_memory=False)):
             logging.info(f"Processing chunk {i}...")
-            file_idx = write_split(chunk, "part", start_idx=file_idx, limit_bytes=args.limit, out_dir=output_dir)
+            file_idx = write_split(chunk, args.name, start_idx=file_idx, limit_bytes=args.limit, out_dir=output_dir)
     elif input_path.suffix == ".parquet":
         logging.info(f"Processing Parquet file: {input_path}")
         df = pd.read_parquet(input_path)
-        file_idx = write_split(df, "part", start_idx=file_idx, limit_bytes=args.limit, out_dir=output_dir)
+        file_idx = write_split(df, args.name, start_idx=file_idx, limit_bytes=args.limit, out_dir=output_dir)
     else:
         logging.error("Unsupported file format. Please provide a CSV or Parquet file.")
         return

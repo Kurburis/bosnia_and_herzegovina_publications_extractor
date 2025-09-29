@@ -12,7 +12,8 @@ import pyarrow.dataset as ds
 st.set_page_config(page_title="B&H Publications Explorer", layout="wide")
 st.title("B&H Publications Explorer")
 
-DEFAULT_SHARD_DIR = "data/compressed"
+DEFAULT_SHARD_DIR_PUBLICATIONS = "data/compressed/publications/"
+DEFAULT_SHARD_DIR_AUTHORS = "data/compressed/authors/"
 
 CANON_COLS = [
     "id",
@@ -26,6 +27,7 @@ CANON_COLS = [
     # arrays
     "locations.source.issn",
     "authorships.author.display_name",
+    "authorships.author.id",
     "authorships.author_position",
     "authorships.institutions.country_code",
     "authorships.institutions.display_name",
@@ -112,21 +114,36 @@ def load_year_filtered(dataset_uri: str, year_range: tuple[int,int], cols: list[
 with st.sidebar:
     st.header("Data & Filters")
 
-    data_dir = st.text_input(
-        "Parquet shards directory",
-        value=DEFAULT_SHARD_DIR,
-        key="data_dir",
-        help="Folder containing part_0000.parquet, part_0001.parquet, …",
+    # Publications directory
+    pub_dir = st.text_input(
+        "Publications Parquet directory",
+        value=DEFAULT_SHARD_DIR_PUBLICATIONS,  # Default publications directory
+        key="pub_dir",
+        help="Folder containing publications Parquet files (e.g., part_0000.parquet, part_0001.parquet, …)",
     )
-    shard_dir = Path(st.session_state["data_dir"])
-    if not shard_dir.exists():
-        st.warning(f"Directory not found: {shard_dir}")
+    pub_shard_dir = Path(st.session_state["pub_dir"])
+    if not pub_shard_dir.exists():
+        st.warning(f"Publications directory not found: {pub_shard_dir}")
         st.stop()
 
-    dataset = ds.dataset(str(shard_dir), format="parquet")
-    actual_cols = resolve_dataset_columns(dataset, CANON_COLS)
+    # Authors directory
+    auth_dir = st.text_input(
+        "Authors Parquet directory",
+        value=DEFAULT_SHARD_DIR_AUTHORS,  # Default authors directory
+        key="auth_dir",
+        help="Folder containing authors Parquet files (e.g., authors_0000.parquet, authors_0001.parquet, …)",
+    )
+    auth_shard_dir = Path(st.session_state["auth_dir"])
+    if not auth_shard_dir.exists():
+        st.warning(f"Authors directory not found: {auth_shard_dir}")
+        st.stop()
 
-    y_min, y_max = infer_year_min_max(dataset)
+    # Load publications dataset
+    pub_dataset = ds.dataset(str(pub_shard_dir), format="parquet")
+    actual_cols = resolve_dataset_columns(pub_dataset, CANON_COLS)
+
+    # Infer year range for publications
+    y_min, y_max = infer_year_min_max(pub_dataset)
     years = st.slider(
         "Publication year",
         min_value=int(y_min), max_value=int(y_max),
@@ -134,10 +151,10 @@ with st.sidebar:
         key="years",
     )
 
-# ---- load dataframe (YEAR-ONLY filter applied here)
-df_year = load_year_filtered(str(shard_dir), (years[0], years[1]), actual_cols)
+# ---- Load publications dataframe (YEAR-ONLY filter applied here)
+df_year = load_year_filtered(str(pub_shard_dir), (years[0], years[1]), actual_cols)
 if df_year.empty:
-    st.warning("No data loaded. Check the directory and year range.")
+    st.warning("No data loaded. Check the publications directory and year range.")
     st.stop()
 
 # Precompute derived columns once (on year-filtered df)
@@ -148,6 +165,27 @@ df_year["is_journal"] = (
           .astype(str).str.lower().eq("journal")
 )
 df_year["scimago_norm"] = df_year.get("scimagoRank", pd.Series(index=df_year.index)).map(norm_scimago)
+
+# ---- Load authors dataframe
+author_db_path = auth_shard_dir / "authors_0000.parquet"
+if not author_db_path.exists():
+    st.warning(f"Author database not found: {author_db_path}")
+    st.stop()
+
+author_df = pd.read_parquet(author_db_path)
+
+# Create df_years table with columns id and oldest_year
+if "id" in author_df.columns and "affiliations.years" in author_df.columns:
+    author_df["affiliations.years"] = author_df["affiliations.years"].apply(to_list)
+    df_years = author_df[["id", "affiliations.years"]].copy()
+    df_years["oldest_year"] = df_years["affiliations.years"].apply(lambda years: min(years) if years else None)
+    df_years = df_years[["id", "oldest_year"]]
+else:
+    st.warning("Required columns ('id', 'affiliations.years') are missing in the author database.")
+    st.stop()
+
+print(df_years.head())
+print(f"Rows in df_years: {len(df_years)}")
 
 # ---------- Widget state init (so selections persist across reruns) ----------
 for key, default in {
@@ -180,9 +218,23 @@ with st.sidebar:
         help="Enabled only when filtering to journals."
     )
 
+    # Add new filter: First author affiliation country = BA
     st.session_state.want_first_author_ba = st.checkbox(
         "First author affiliation country = BA",
         value=st.session_state.want_first_author_ba, key="first_ba_checkbox"
+    )
+
+    # Make the second checkbox and slider disabled until the first checkbox is checked
+    st.session_state.first_author_since_enabled = st.checkbox(
+        "AND the first author has been publishing since",
+        value=False, key="first_author_since_checkbox",
+        disabled=not st.session_state.want_first_author_ba  # Disable if the first checkbox is not checked
+    )
+
+    st.session_state.first_author_since = st.slider(
+        "Select year range", 2015, 2025,
+        (2020, 2025), key="first_author_since_slider",
+        disabled=not st.session_state.first_author_since_enabled  # Disable if the second checkbox is not checked
     )
 
 # ---------- Build OPTIONS from df_year ONLY, union with current selections ---
@@ -266,6 +318,23 @@ if st.session_state.want_first_author_ba:
     with st.spinner("Filtering by first author affiliation (BA)…"):
         df = df[first_author_ba_mask(df)]
 
+# First author publishing since
+if st.session_state.want_first_author_ba and st.session_state.first_author_since_enabled:
+    with st.spinner("Filtering by first author publishing year…"):
+        min_year = st.session_state.first_author_since[0]
+        max_year = st.session_state.first_author_since[1]
+
+        # Ensure `oldest_year` is numeric and drop NaN values
+        df_years["oldest_year"] = pd.to_numeric(df_years["oldest_year"], errors="coerce").dropna()
+
+        # Apply the filter based on the selected year range
+        valid_ids = df_years.loc[df_years["oldest_year"].between(min_year, max_year, inclusive="both"), "id"]
+
+        # Apply the filter based on valid IDs and check only the first element of arrays
+        df = df[df["authorships.author.id"].apply(
+            lambda authors: to_list(authors)[0] in valid_ids.values if to_list(authors) else False
+        )]
+
 st.caption(f"Active rows: {len(df):,}")
 
 # ----------------------- VISUALS --------------------------------------------
@@ -341,4 +410,7 @@ present_cols = [c for c in ["publication_year","display_name",
                             "scimago_norm","cited_by_count","id"] if c in df.columns]
 if present_cols:
     st.dataframe(df[present_cols].head(200), use_container_width=True)
+
+print(valid_years.head())
+print(f"Valid IDs: {valid_ids}")
 

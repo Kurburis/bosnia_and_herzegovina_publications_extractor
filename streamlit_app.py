@@ -172,20 +172,17 @@ if not author_db_path.exists():
     st.warning(f"Author database not found: {author_db_path}")
     st.stop()
 
-author_df = pd.read_parquet(author_db_path)
+author_df = pd.read_parquet(author_db_path, columns=["id", "affiliations.years"])
 
 # Create df_years table with columns id and oldest_year
 if "id" in author_df.columns and "affiliations.years" in author_df.columns:
     author_df["affiliations.years"] = author_df["affiliations.years"].apply(to_list)
-    df_years = author_df[["id", "affiliations.years"]].copy()
+    df_years = author_df[["id", "affiliations.years"]] 
     df_years["oldest_year"] = df_years["affiliations.years"].apply(lambda years: min(years) if years else None)
     df_years = df_years[["id", "oldest_year"]]
 else:
     st.warning("Required columns ('id', 'affiliations.years') are missing in the author database.")
     st.stop()
-
-print(df_years.head())
-print(f"Rows in df_years: {len(df_years)}")
 
 # ---------- Widget state init (so selections persist across reruns) ----------
 for key, default in {
@@ -410,7 +407,3 @@ present_cols = [c for c in ["publication_year","display_name",
                             "scimago_norm","cited_by_count","id"] if c in df.columns]
 if present_cols:
     st.dataframe(df[present_cols].head(200), use_container_width=True)
-
-print(valid_years.head())
-print(f"Valid IDs: {valid_ids}")
-

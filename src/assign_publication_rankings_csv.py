@@ -20,6 +20,34 @@ def normalize_venue_name(name):
     # Lowercase
     return name.lower()
 
+def normalize_issn(raw: str, create_array: bool = True) -> str | None:
+    """
+    Canonical ISSN (no hyphen): 8 chars, digits with optional final X.
+    - Remove non-alphanumerics (hyphens, spaces, etc.)
+    - Uppercase final X
+    - Left-pad with zeros to length 8 if shorter
+    - Return None if cannot be normalized to 8 chars matching \d{7}[\dX]
+    """
+    if raw is None:
+        return None
+
+    if create_array:
+        raw_list = raw.split(", ")
+        for idx in range(0, len(raw_list)):
+            s = re.sub(r"[^0-9xX]", "", str(raw_list[idx])).upper()  # e.g., '0038-093x' -> '0038093X'
+            if len(s) < 8:
+                s = s.zfill(8)  # add leading zeros
+            raw_list[idx] = s
+            # if len(s) != 8 or not re.fullmatch(r"\d{7}[\dX]", s):
+            #     return None
+        return raw_list
+    else:
+        s = re.sub(r"[^0-9xX]", "", str(raw)).upper()  # e.g., '0038-093x' -> '0038093X'
+        if len(s) < 8:
+            s = s.zfill(8)  # add leading zeros
+        return s
+
+
 def extract_acronym(name):
     """Extract acronym in brackets, e.g. 'International Conference on AI (ICAT)' -> 'ICAT'"""
     match = re.search(r'\(([A-Z0-9]{2,})\)', name)
@@ -101,17 +129,38 @@ def main():
         except Exception as e:
             logging.error(f"Error reading journal CSV: {e}")
             return
+ 
         journal_lookup = {}
         quartile_cols = [col for col in journal_df.columns if col.startswith("Quartile - ")]
+
+        skipped, dup = 0, 0
         for _, row in journal_df.iterrows():
-            issn_val = str(row.get("Issn", "")).strip()
-            if issn_val and issn_val.lower() != "nan":
-                journal_lookup[issn_val] = row
-        logging.info(f"Total unique ISSNs in journal lookup: {len(journal_lookup)}")
+            issn_val = row.get("Issn", "")
+            if issn_val == "00380938, 1573093X":
+                print("Nasao ga svemu")
+                if not normalize_issn(issn_val):
+                    print("Ne razdvaja zareze")
+            norm = normalize_issn(issn_val)
+            if not norm:
+                skipped += 1
+                continue
+            for issn in norm:
+                if issn in journal_lookup:
+                    dup += 1
+                journal_lookup[issn] = row  # keep last occurrence; change if you prefer first
+
+        logging.info(
+            f"Journal lookup: {len(journal_lookup)} unique ISSNs "
+            f"(skipped {skipped} invalid, {dup} duplicates after normalization)"
+        )
 
         if args.issn_column and args.issn_column in pubs_df.columns:
             for idx, pub in pubs_df.iterrows():
                 pub_id = pub.get("id", "")
+
+                #if pub_id != "https://openalex.org/W2142234851":
+                #    continue
+
                 year_val = pub.get(args.year_column, "")
                 try:
                     pub_year = int(float(year_val)) if year_val else None
@@ -119,7 +168,6 @@ def main():
                     pub_year = None
                 journal_rank = None
                 jhindex = None
-
                 # Parse ISSNs from the single column
                 issn_column_value = pub.get(args.issn_column, "")
                 if not issn_column_value or issn_column_value.lower() == "nan":
@@ -137,7 +185,12 @@ def main():
 
                 logging.debug(f"Publication idx {idx} id {pub_id} ISSNs: {issn_list} year: {pub_year}")
                 for issn in issn_list:
-                    issn = str(issn).strip()
+                    print(issn)
+                    issn = normalize_issn(issn, False)
+                    print(issn)
+                    if not issn:
+                        logging.debug(f"Publication idx {idx} id {pub_id} has invalid ISSN: {issn}")
+                        continue 
                     journal_row = journal_lookup.get(issn)
                     if journal_row is not None:
                         intervals = get_journal_intervals(journal_row, quartile_cols)
@@ -150,6 +203,7 @@ def main():
                                 break
                         if journal_rank or jhindex:
                             break
+                
                 pubs_df.at[idx, "scimagoRank"] = journal_rank if journal_rank else ""
                 pubs_df.at[idx, "jHindex"] = jhindex if jhindex else ""
         else:
